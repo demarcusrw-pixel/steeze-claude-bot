@@ -20,13 +20,18 @@ DATA_FILE = "agent_data.json"
 
 def call_bridge(command, payload={}):
     if not BRIDGE_URL:
+        print("Bridge not configured")
         return {"ok": False, "error": "Bridge not connected"}
     try:
+        print(f"Calling bridge: {BRIDGE_URL} command={command}")
         data = json.dumps({"secret": BRIDGE_SECRET, "command": command, "payload": payload}).encode()
         req = urllib.request.Request(f"{BRIDGE_URL}", data=data, headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read())
+            result = json.loads(r.read())
+            print(f"Bridge result: {result}")
+            return result
     except Exception as e:
+        print(f"Bridge error: {e}")
         return {"ok": False, "error": str(e)}
 
 SYSTEM_PROMPT = """You are SteezeClaude — Demarcus Walker's personal AI agent. You run via Telegram.
