@@ -219,16 +219,19 @@ def send_telegram(text):
     urllib.request.urlopen(req)
 
 class WebhookHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Bridge polls this endpoint for pending commands
-        if self.path == "/bridge/poll":
-            secret = self.headers.get("X-Bridge-Secret", "")
-            if secret != BRIDGE_SECRET:
-                self.send_response(403)
-                self.end_headers()
-                return
+    def do_POST(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
 
+        # Bridge polls for pending commands
+        if self.path == "/bridge/poll":
             try:
+                req_data = json.loads(body)
+                if req_data.get("secret") != BRIDGE_SECRET:
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+
                 if os.path.exists(COMMAND_QUEUE_FILE):
                     with open(COMMAND_QUEUE_FILE, "r") as f:
                         queue = json.load(f)
@@ -236,7 +239,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     queue = []
 
                 pending = [c for c in queue if c.get("status") == "pending"]
-                # mark as dispatched
                 for c in pending:
                     c["status"] = "dispatched"
                 with open(COMMAND_QUEUE_FILE, "w") as f:
@@ -246,16 +248,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps(pending).encode())
+                print(f"Poll: returned {len(pending)} commands")
             except Exception as e:
+                print(f"Poll handler error: {e}")
                 self.send_response(500)
                 self.end_headers()
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def do_POST(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+            return
 
         # Bridge acks completed commands
         if self.path == "/bridge/ack":

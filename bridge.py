@@ -24,14 +24,20 @@ os.makedirs(NOTES_DIR, exist_ok=True)
 
 def poll_commands():
     try:
+        data = json.dumps({"secret": BRIDGE_SECRET}).encode()
         req = urllib.request.Request(
             f"{RAILWAY_URL}/bridge/poll",
-            headers={"X-Bridge-Secret": BRIDGE_SECRET},
-            method="GET"
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
         )
         with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read())
+            result = json.loads(r.read())
+            if result:
+                print(f"Got {len(result)} command(s)")
+            return result
     except Exception as e:
+        print(f"Poll error: {e}")
         return []
 
 def ack_command(command_id, result):
