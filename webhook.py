@@ -13,26 +13,38 @@ import pytz
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = int(os.environ["CHAT_ID"])
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-BRIDGE_URL = os.environ.get("BRIDGE_URL", "")
 BRIDGE_SECRET = os.environ.get("BRIDGE_SECRET", "steeze2026")
 TZ = pytz.timezone("America/New_York")
 DATA_FILE = "agent_data.json"
+COMMAND_QUEUE_FILE = "command_queue.json"
+import uuid
 
-def call_bridge(command, payload={}):
-    if not BRIDGE_URL:
-        print("Bridge not configured")
-        return {"ok": False, "error": "Bridge not connected"}
+def queue_command(command, payload={}):
+    """Store command in queue for Mac bridge to pick up via polling."""
     try:
-        print(f"Calling bridge: {BRIDGE_URL} command={command}")
-        data = json.dumps({"secret": BRIDGE_SECRET, "command": command, "payload": payload}).encode()
-        url = f"{BRIDGE_URL}?ngrok-skip-browser-warning=true"
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "SteezeClaude/1.0", "ngrok-skip-browser-warning": "1"}, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            result = json.loads(r.read())
-            print(f"Bridge result: {result}")
-            return result
+        if os.path.exists(COMMAND_QUEUE_FILE):
+            with open(COMMAND_QUEUE_FILE, "r") as f:
+                queue = json.load(f)
+        else:
+            queue = []
+
+        cmd = {
+            "id": str(uuid.uuid4()),
+            "command": command,
+            "payload": payload,
+            "status": "pending",
+            "created": datetime.now(TZ).isoformat()
+        }
+        queue.append(cmd)
+
+        with open(COMMAND_QUEUE_FILE, "w") as f:
+            json.dump(queue, f)
+
+        print(f"Queued command: {command}")
+        return {"ok": True, "id": cmd["id"]}
     except Exception as e:
-        print(f"Bridge error: {e}")
+        print(f"Queue error: {e}")
+        return {"ok": False, "error": str(e)}
         return {"ok": False, "error": str(e)}
 
 SYSTEM_PROMPT = """You are SteezeClaude — Demarcus Walker's personal AI agent. You run via Telegram.
@@ -165,15 +177,15 @@ def handle_tool(tool, tool_data, data):
         data["tasks"] = [t for t in data["tasks"] if not t.get("done")]
 
     elif tool == "mac_save_idea":
-        call_bridge("save_idea", tool_data)
+        queue_command("save_idea", tool_data)
     elif tool == "mac_save_task":
-        call_bridge("save_task", tool_data)
+        queue_command("save_task", tool_data)
     elif tool == "mac_open_ableton":
-        call_bridge("open_ableton", tool_data)
+        queue_command("open_ableton", tool_data)
     elif tool == "mac_open_app":
-        call_bridge("open_app", tool_data)
+        queue_command("open_app", tool_data)
     elif tool == "mac_run":
-        call_bridge("run_script", tool_data)
+        queue_command("run_script", tool_data)
 
     save_data(data)
     return data
@@ -207,13 +219,78 @@ def send_telegram(text):
     urllib.request.urlopen(req)
 
 class WebhookHandler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        content_length = int(self.headers["Content-Length"])
-        body = self.rfile.read(content_length)
-        update = json.loads(body)
+    def do_GET(self):
+        # Bridge polls this endpoint for pending commands
+        if self.path == "/bridge/poll":
+            secret = self.headers.get("X-Bridge-Secret", "")
+            if secret != BRIDGE_SECRET:
+                self.send_response(403)
+                self.end_headers()
+                return
 
+            try:
+                if os.path.exists(COMMAND_QUEUE_FILE):
+                    with open(COMMAND_QUEUE_FILE, "r") as f:
+                        queue = json.load(f)
+                else:
+                    queue = []
+
+                pending = [c for c in queue if c.get("status") == "pending"]
+                # mark as dispatched
+                for c in pending:
+                    c["status"] = "dispatched"
+                with open(COMMAND_QUEUE_FILE, "w") as f:
+                    json.dump(queue, f)
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(pending).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        # Bridge acks completed commands
+        if self.path == "/bridge/ack":
+            try:
+                data = json.loads(body)
+                if data.get("secret") != BRIDGE_SECRET:
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+
+                cmd_id = data.get("id")
+                result = data.get("result", "")
+
+                if os.path.exists(COMMAND_QUEUE_FILE):
+                    with open(COMMAND_QUEUE_FILE, "r") as f:
+                        queue = json.load(f)
+                    for c in queue:
+                        if c["id"] == cmd_id:
+                            c["status"] = "done"
+                            c["result"] = result
+                    with open(COMMAND_QUEUE_FILE, "w") as f:
+                        json.dump(queue, f)
+
+                self.send_response(200)
+                self.end_headers()
+                print(f"Ack: {cmd_id} -> {result}")
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+            return
+
+        # Telegram webhook
         self.send_response(200)
         self.end_headers()
+        update = json.loads(body)
 
         try:
             message = update.get("message", {})
