@@ -1,0 +1,17 @@
+[build]
+builder = "nixpacks"
+
+[[services]]
+name = "morning-briefing"
+cronSchedule = "0 13 * * *"
+startCommand = "python notify.py morning"
+
+[[services]]
+name = "post-check"
+cronSchedule = "0 22 * * *"
+startCommand = "python notify.py post_check"
+
+[[services]]
+name = "beat-session"
+cronSchedule = "0 2 * * *"
+startCommand = "python notify.py beat_session"
