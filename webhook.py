@@ -13,8 +13,21 @@ import pytz
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = int(os.environ["CHAT_ID"])
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+BRIDGE_URL = os.environ.get("BRIDGE_URL", "")
+BRIDGE_SECRET = os.environ.get("BRIDGE_SECRET", "steeze2026")
 TZ = pytz.timezone("America/New_York")
 DATA_FILE = "agent_data.json"
+
+def call_bridge(command, payload={}):
+    if not BRIDGE_URL:
+        return {"ok": False, "error": "Bridge not connected"}
+    try:
+        data = json.dumps({"secret": BRIDGE_SECRET, "command": command, "payload": payload}).encode()
+        req = urllib.request.Request(f"{BRIDGE_URL}", data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 SYSTEM_PROMPT = """You are SteezeClaude — Demarcus Walker's personal AI agent. You run via Telegram.
 
@@ -39,6 +52,13 @@ Available tools:
 - "log_activity" — log something he did. data: {"activity": "text", "category": "music|content|body|app|other"}
 - "show_summary" — show today's summary of tasks + activity. data: {}
 - "clear_tasks" — clear completed tasks. data: {}
+- "mac_save_idea" — save an idea/note to his Mac filesystem. data: {"text": "idea text", "category": "beat|lyric|content|app|general"}
+- "mac_save_task" — save a task to his Mac filesystem. data: {"text": "task text"}
+- "mac_open_ableton" — open Ableton on his Mac. data: {}
+- "mac_open_app" — open any app on his Mac. data: {"app": "app name"}
+- "mac_run" — run a terminal command on his Mac. data: {"script": "command"}
+
+Use mac_ tools when he wants something saved to his computer or wants to open/control apps.
 
 How to talk:
 - SHORT and real. Like a smart friend, not a life coach.
@@ -137,6 +157,17 @@ def handle_tool(tool, tool_data, data):
 
     elif tool == "clear_tasks":
         data["tasks"] = [t for t in data["tasks"] if not t.get("done")]
+
+    elif tool == "mac_save_idea":
+        call_bridge("save_idea", tool_data)
+    elif tool == "mac_save_task":
+        call_bridge("save_task", tool_data)
+    elif tool == "mac_open_ableton":
+        call_bridge("open_ableton", tool_data)
+    elif tool == "mac_open_app":
+        call_bridge("open_app", tool_data)
+    elif tool == "mac_run":
+        call_bridge("run_script", tool_data)
 
     save_data(data)
     return data
