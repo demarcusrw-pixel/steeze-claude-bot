@@ -25,7 +25,8 @@ def call_bridge(command, payload={}):
     try:
         print(f"Calling bridge: {BRIDGE_URL} command={command}")
         data = json.dumps({"secret": BRIDGE_SECRET, "command": command, "payload": payload}).encode()
-        req = urllib.request.Request(f"{BRIDGE_URL}", data=data, headers={"Content-Type": "application/json", "ngrok-skip-browser-warning": "true"}, method="POST")
+        url = f"{BRIDGE_URL}?ngrok-skip-browser-warning=true"
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "SteezeClaude/1.0", "ngrok-skip-browser-warning": "1"}, method="POST")
         with urllib.request.urlopen(req, timeout=10) as r:
             result = json.loads(r.read())
             print(f"Bridge result: {result}")
