@@ -2,5 +2,4 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python notify.py"
-cronSchedule = "0 * * * *"
+startCommand = "python webhook.py"
